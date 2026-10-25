@@ -29,6 +29,17 @@ async function user(req,res,next){try{const r=await q('SELECT id,name,pseudo,ema
 const admin=(req,res,next)=>req.user&&req.user.role==='admin'?next():res.status(403).json({error:'Accès réservé à l’administrateur'});
 async function setup(){
  await q(`CREATE TABLE IF NOT EXISTS users(id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,pseudo TEXT NOT NULL,email TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'user',balance NUMERIC(12,2) NOT NULL DEFAULT 0,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
+ // Compatibility migration: Render may already contain an older users table.
+ // CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pseudo TEXT`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(12,2) NOT NULL DEFAULT 0`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+ await q(`CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users(email) WHERE email IS NOT NULL`);
+
  await q(`CREATE TABLE IF NOT EXISTS deposits(id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),amount NUMERIC(12,2) NOT NULL,method TEXT NOT NULL,reference TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'pending',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),reviewed_at TIMESTAMPTZ)`);
  await q(`CREATE TABLE IF NOT EXISTS orders(id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),game TEXT NOT NULL,package_name TEXT NOT NULL,player_id TEXT NOT NULL DEFAULT '',amount NUMERIC(12,2) NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
  await q(`CREATE TABLE IF NOT EXISTS packages(id BIGSERIAL PRIMARY KEY,game TEXT NOT NULL,name TEXT NOT NULL,price NUMERIC(12,2) NOT NULL,active BOOLEAN NOT NULL DEFAULT TRUE,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())`);
