@@ -35,6 +35,10 @@ async function setup(){
  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pseudo TEXT`);
  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`);
  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+ await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS pass_hash TEXT`);
+ // Keep both password column names for compatibility with the existing Render database.
+ await q(`UPDATE users SET password_hash = pass_hash WHERE password_hash IS NULL AND pass_hash IS NOT NULL`);
+ await q(`UPDATE users SET pass_hash = password_hash WHERE pass_hash IS NULL AND password_hash IS NOT NULL`);
  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'`);
  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(12,2) NOT NULL DEFAULT 0`);
  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
@@ -50,8 +54,8 @@ async function setup(){
  if(email&&pass){
   const existing=await q('SELECT id FROM users WHERE email=$1',[email]);
   const hash=await bcrypt.hash(pass,12);
-  if(existing.rowCount) await q("UPDATE users SET role='admin',password_hash=$2 WHERE email=$1",[email,hash]);
-  else await q("INSERT INTO users(name,pseudo,email,password_hash,role) VALUES($1,$1,$2,$3,'admin')",[process.env.ADMIN_NAME||'Zhuo Fan',email,hash]);
+  if(existing.rowCount) await q("UPDATE users SET role='admin',password_hash=$2,pass_hash=$2 WHERE email=$1",[email,hash]);
+  else await q("INSERT INTO users(name,pseudo,email,password_hash,pass_hash,role) VALUES($1,$1,$2,$3,$3,'admin')",[process.env.ADMIN_NAME||'Zhuo Fan',email,hash]);
  }
 }
 app.get('/healthz',async(req,res)=>{try{await q('SELECT 1');res.json({ok:true,service:'ZHUO FAN HT API',database:'connected',time:new Date().toISOString()})}catch(e){res.status(503).json({ok:false,service:'ZHUO FAN HT API',database:'disconnected',error:'Database non configurée'})}});
@@ -64,13 +68,13 @@ app.post('/api/auth/register',async(req,res,next)=>{try{
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email))return res.status(400).json({error:'Adresse e-mail invalide'});
  if(password.length<6)return res.status(400).json({error:'Mot de passe: 6 caractères minimum'});
  const hash=await bcrypt.hash(password,12);
- const r=await q('INSERT INTO users(name,pseudo,email,password_hash) VALUES($1,$1,$2,$3) RETURNING id,name,pseudo,email,role,balance,created_at',[name,email,hash]);
+ const r=await q('INSERT INTO users(name,pseudo,email,password_hash,pass_hash) VALUES($1,$1,$2,$3,$3) RETURNING id,name,pseudo,email,role,balance,created_at',[name,email,hash]);
  const u=r.rows[0];res.status(201).json({token:token(u),user:u});
 }catch(e){if(e.code==='23505')return res.status(409).json({error:'Cette adresse e-mail possède déjà un compte'});next(e)}});
 app.post('/api/auth/login',async(req,res,next)=>{try{
  const email=cleanEmail(req.body.email),password=String(req.body.password||'');
  const r=await q('SELECT * FROM users WHERE email=$1',[email]);
- if(!r.rowCount||!(await bcrypt.compare(password,r.rows[0].password_hash)))return res.status(401).json({error:'E-mail ou mot de passe incorrect'});
+ if(!r.rowCount||!(await bcrypt.compare(password,r.rows[0].password_hash || r.rows[0].pass_hash)))return res.status(401).json({error:'E-mail ou mot de passe incorrect'});
  const u=r.rows[0];res.json({token:token(u),user:{id:u.id,name:u.name,pseudo:u.pseudo,email:u.email,role:u.role,balance:u.balance}});
 }catch(e){next(e)}});
 app.get('/api/me',auth,user,(req,res)=>res.json({user:req.user}));
